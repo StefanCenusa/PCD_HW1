@@ -6,7 +6,7 @@ import time
 import utils
 
 
-def shutdown(signum, frame):
+def shutdown():
     if log_file:
         log_file.write("TRANSMISSION INCOMPLETE\n")
         log_file.write("Segments sent:\t\t" + str(sent) + "\n")
@@ -120,7 +120,6 @@ if __name__ == '__main__':
                 if text == "":
                     final = True
 
-                # Increment sequence and ack numbers
                 seqnum += 1
                 acknum += 1
 
@@ -137,6 +136,7 @@ if __name__ == '__main__':
         except socket.timeout:
             packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, final, text)
             send_sock.sendto(packet, (remote_ip, remote_port))
+            send_time = time.time()
             sent += 1
             retransmitted += 1
 
