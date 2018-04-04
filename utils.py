@@ -6,7 +6,6 @@ TIMEOUT = 1
 CONTENT_SIZE = 1000
 HEADER_SIZE = 14
 PACKET_SIZE = CONTENT_SIZE + HEADER_SIZE
-ACK_PORT = 9696
 
 
 def make_packet(source_port, dest_port, seqnum, acknum, ack, final, contents):

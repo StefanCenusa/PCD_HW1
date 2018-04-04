@@ -33,19 +33,21 @@ if __name__ == '__main__':
         remote_ip = socket.gethostbyname(sys.argv[2])
         remote_port = int(sys.argv[3])
         local_port = int(sys.argv[4])
+        ack_packets = int(sys.argv[5])
 
     except IndexError, TypeError:
-        exit('usage: ./client.py <filename> <remote_IP> <remote_port> <local_port_num>')
+        exit('usage: ./client.py <filename> <remote_IP> <remote_port> <local_port_num> <ack_packets>')
 
     try:
         send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         send_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         send_sock.bind(("", local_port))
 
-        ack_sock = socket.socket()
-        ack_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        ack_sock.bind(("", local_port))
-        ack_sock.listen(1)
+        if ack_packets:
+            ack_sock = socket.socket()
+            ack_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            ack_sock.bind(("", local_port))
+            ack_sock.listen(1)
     except socket.error:
         exit('Error creating socket.')
 
@@ -62,83 +64,113 @@ if __name__ == '__main__':
 
     log_file = sys.stdout
 
-    tcp_established = False
-    text = send_file.read(utils.CONTENT_SIZE)
+    if ack_packets:
+        tcp_established = False
+        text = send_file.read(utils.CONTENT_SIZE)
 
-    while not tcp_established:
-        try:
-            packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, False, text)
-
-            send_sock.sendto(packet, (remote_ip, remote_port))
-            sent += 1
-            send_time = time.time()
-
-            signal.signal(signal.SIGALRM, utils.timeout)
-            signal.alarm(utils.TIMEOUT)
-
-            recv_sock, addr = ack_sock.accept()
-
-            signal.alarm(0)
-            tcp_established = True
-            recv_sock.settimeout(utils.TIMEOUT)
-        except socket.timeout:
-            retransmitted += 1
-            continue
-
-    while True:
-        try:
-            ack = recv_sock.recv(utils.HEADER_SIZE)
-            recv_time = time.time()
-
-            ack_source_port, ack_dest_port, ack_seqnum, \
-            ack_acknum, ack_valid, ack_final, ack_contents = utils.unpack(ack)
-
-            log = str(datetime.datetime.now()) + " " + \
-                  str(ack_source_port) + " " + \
-                  str(ack_dest_port) + " " + \
-                  str(ack_seqnum) + " " + \
-                  str(ack_acknum) + "\n"
-
-            if ack_valid:
-                log = log.strip("\n") + " ACK\n"
-            if ack_final:
-                log = log.strip("\n") + " FIN\n"
-
-            if ack_acknum == acknum and ack_valid:
-
-                rtt = recv_time - send_time
-
-                log = log.strip() + " " + str(rtt) + "\n"
-
-                log_file.write(log)
-
-                if ack_final:
-                    break
-
-                text = send_file.read(utils.CONTENT_SIZE)
-
-                if text == "":
-                    final = True
-
-                seqnum += 1
-                acknum += 1
-
-                packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, final, text)
+        while not tcp_established:
+            try:
+                packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, False, text)
 
                 send_sock.sendto(packet, (remote_ip, remote_port))
                 sent += 1
                 send_time = time.time()
 
-            else:
-                log_file.write(log)
-                raise socket.timeout
+                signal.signal(signal.SIGALRM, utils.timeout)
+                signal.alarm(utils.TIMEOUT)
 
-        except socket.timeout:
+                recv_sock, addr = ack_sock.accept()
+
+                signal.alarm(0)
+                tcp_established = True
+                recv_sock.settimeout(utils.TIMEOUT)
+            except socket.timeout:
+                retransmitted += 1
+                continue
+
+    while True:
+        if ack_packets:
+            # stop-and-wait behaviour
+            try:
+                ack = recv_sock.recv(utils.HEADER_SIZE)
+                recv_time = time.time()
+
+                ack_source_port, ack_dest_port, ack_seqnum, \
+                ack_acknum, ack_valid, ack_final, ack_contents = utils.unpack(ack)
+
+                log = str(datetime.datetime.now()) + " " + \
+                      str(ack_source_port) + " " + \
+                      str(ack_dest_port) + " " + \
+                      str(ack_seqnum) + " " + \
+                      str(ack_acknum) + "\n"
+
+                if ack_valid:
+                    log = log.strip("\n") + " ACK\n"
+                if ack_final:
+                    log = log.strip("\n") + " FIN\n"
+
+                if ack_acknum == acknum and ack_valid:
+
+                    rtt = recv_time - send_time
+
+                    log = log.strip() + " " + str(rtt) + "\n"
+
+                    log_file.write(log)
+
+                    if ack_final:
+                        break
+
+                    text = send_file.read(utils.CONTENT_SIZE)
+
+                    if text == "":
+                        final = True
+
+                    seqnum += 1
+                    acknum += 1
+
+                    packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, final, text)
+
+                    send_sock.sendto(packet, (remote_ip, remote_port))
+                    sent += 1
+                    send_time = time.time()
+
+                else:
+                    log_file.write(log)
+                    raise socket.timeout
+            except socket.timeout:
+                packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, final, text)
+                send_sock.sendto(packet, (remote_ip, remote_port))
+                send_time = time.time()
+                sent += 1
+                retransmitted += 1
+        else:
+            # streaming behaviour
+            text = send_file.read(utils.CONTENT_SIZE)
+
+            if text == "":
+                final = True
+
+            seqnum += 1
+            acknum += 1
+
             packet = utils.make_packet(local_port, remote_port, seqnum, acknum, False, final, text)
+
             send_sock.sendto(packet, (remote_ip, remote_port))
-            send_time = time.time()
             sent += 1
-            retransmitted += 1
+
+            log = str(datetime.datetime.now()) + " " + \
+                  str(local_port) + " " + \
+                  str(remote_port) + " " + \
+                  str(seqnum) + " " + \
+                  str(acknum) + "\n"
+
+            if final:
+                log = log.strip("\n") + " FIN\n"
+
+            log_file.write(log)
+
+            if final:
+                break
 
     print("\nTRANSMISSION SUCCESSFUL")
     print("Segments sent:\t\t" + str(sent))

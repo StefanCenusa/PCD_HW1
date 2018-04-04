@@ -45,9 +45,10 @@ if __name__ == '__main__':
     try:
         filename = sys.argv[1]
         listen_port = int(sys.argv[2])
+        ack_packets = int(sys.argv[3])
 
     except IndexError, TypeError:
-        exit("usage: ./receiver.py <filename> <listening_port>")
+        exit("usage: ./server.py <filename> <listening_port> <ack_packets>")
 
     try:
         recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -64,30 +65,17 @@ if __name__ == '__main__':
     except IOError:
         exit("Unable to open " + filename + ".")
 
-    next_acknum = 0
-
-    packet, addr = recv_sock.recvfrom(utils.PACKET_SIZE)
-
-    sender_ip = addr[0]
-    sender_port = addr[1]
-    ack_sock.connect((sender_ip, sender_port))
-
-    source_port, dest_port, seqnum, acknum, ack, final, contents = utils.unpack(packet)
-
-    packet_valid = next_acknum == acknum
-
-    if packet_valid:
-        recv_file.write(contents)
-        next_acknum += 1
-
-    log_packet(source_port, dest_port, seqnum, acknum, False)
-
-    send_ack_packet(ack_sock, sender_port, seqnum, acknum, packet_valid, False)
-
-    while True:
+    if ack_packets:
+        next_acknum = 0
 
         packet, addr = recv_sock.recvfrom(utils.PACKET_SIZE)
+
         source_port, dest_port, seqnum, acknum, ack, final, contents = utils.unpack(packet)
+
+
+        sender_ip = addr[0]
+        sender_port = addr[1]
+        ack_sock.connect((sender_ip, sender_port))
 
         packet_valid = next_acknum == acknum
 
@@ -95,9 +83,27 @@ if __name__ == '__main__':
             recv_file.write(contents)
             next_acknum += 1
 
-        log_packet(source_port, dest_port, seqnum, acknum, final)
+        send_ack_packet(ack_sock, sender_port, seqnum, acknum, packet_valid, False)
 
-        send_ack_packet(ack_sock, sender_port, seqnum, acknum, packet_valid, final)
+        log_packet(source_port, dest_port, seqnum, acknum, False)
+
+    while True:
+
+        packet, addr = recv_sock.recvfrom(utils.PACKET_SIZE)
+        source_port, dest_port, seqnum, acknum, ack, final, contents = utils.unpack(packet)
+
+        if ack_packets:
+            packet_valid = next_acknum == acknum
+
+            if packet_valid:
+                recv_file.write(contents)
+                next_acknum += 1
+
+            send_ack_packet(ack_sock, sender_port, seqnum, acknum, packet_valid, final)
+        else:
+            recv_file.write(contents)
+
+        log_packet(source_port, dest_port, seqnum, acknum, final)
 
         if final:
             break
